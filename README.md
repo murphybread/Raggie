@@ -1,6 +1,6 @@
-# YachtAI
+# Raggie
 
-YachtAI는 디스코드 채팅 로그를 수집·저장하고, 저장된 데이터를 기반으로 RAG(Retrieval-Augmented Generation) 방식의 답변을 제공하는 소규모 서버용 Express 백엔드 프로젝트입니다.
+Raggie는 디스코드 채팅 로그를 수집·저장하고, 저장된 데이터를 기반으로 RAG(Retrieval-Augmented Generation) 방식의 답변을 제공하는 소규모 서버용 Express 백엔드 프로젝트입니다.
 
 ## 주요 기능
 - 디스코드 채팅 로그 수집 및 저장 (messages.json)
