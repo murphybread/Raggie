@@ -1,10 +1,8 @@
 import { OpenAI } from "openai";
 import { EmbedBuilder } from "discord.js";
 import fs from "fs";
-import path from "path";
-import { getLogFileNameByChannel, collectRecentMessagesForChannel } from "../utils/logCollector.js";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const HISTORY_LENGTH = 15; // 최근 메시지 수
 
 export default {
   data: {
@@ -20,55 +18,47 @@ export default {
     ],
   },
   async execute(interaction) {
-    // 1. 다른 어떤 작업보다 먼저 deferReply()를 호출하여 3초 타임아웃을 피합니다.
-    
     await interaction.deferReply();
-    
-    
-
-    
-    
     const question = interaction.options.getString("내용");
 
-    // 3. 실시간 로그 수집
-    console.log(`[${interaction.channel.id}] /질문 명령어 사용으로 실시간 로그 수집 실행...`);
+    // 동적으로 logCollector import
+    const { getLogFileNameByChannel, collectRecentMessagesForChannel } = await import("../utils/logCollector.js");
+
+    // 실시간 로그 수집
     await collectRecentMessagesForChannel(interaction.client, interaction.channel.id);
 
-    // 4. 로그 파일 읽기
+    // 로그 파일 읽기
     const logFile = getLogFileNameByChannel(interaction.channel.id, interaction.channel.name);
     let recentLogs = [];
     if (fs.existsSync(logFile)) {
       const allLogs = JSON.parse(fs.readFileSync(logFile, "utf-8"));
-      recentLogs = allLogs.slice(-15);
+      recentLogs = allLogs.slice(-HISTORY_LENGTH);
     }
 
-    // 5. 컨텍스트 생성
-    let contextText = "채널에 대화 기록이 없습니다.";
-    if (recentLogs.length > 0) {
-      contextText = recentLogs
-        .map((msg) => {
-          const author = msg.isBot ? `AI(${msg.author})` : `사용자(${msg.author})`;
-          if (msg.isBot && msg.embeds && msg.embeds.length > 0) {
-            const embed = msg.embeds[0];
-            const originalQuestion = embed.description || "";
-            const botAnswer = embed.fields?.[0]?.value || "";
-            return `${author}: (질문: "${originalQuestion}"에 대해) "${botAnswer}" 라고 답변함.`;
-          }
-          return `${author}: "${msg.content}"`;
-        })
-        .join("\n");
+    // 멀티턴 프롬프트: OpenAI messages 배열로 변환
+    const messages = [];
+    for (const msg of recentLogs) {
+      if (msg.isBot && msg.embeds && msg.embeds.length > 0) {
+        // 이전 AI 답변
+        const embed = msg.embeds[0];
+        const originalQuestion = embed.description || "";
+        const botAnswer = embed.fields?.[0]?.value || "";
+        messages.push({ role: "user", content: originalQuestion });
+        messages.push({ role: "assistant", content: botAnswer });
+      } else {
+        // 일반 사용자 메시지
+        messages.push({ role: "user", content: msg.content });
+      }
     }
-    console.log(`[${interaction.channel.id}] 최근 대화 내용: ${contextText}`);
+    // 마지막에 현재 질문 추가
+    messages.push({ role: "user", content: question });
 
-    // 6. 프롬프트 구성
-    const prompt = `당신은 디스코드 채널에서 활동하는 AI 어시스턴트 'Raggie'입니다. 아래에 제공되는 '최근 대화 내용'을 참고하여 사용자의 '새로운 질문'에 대해 자연스럽게 답변해주세요.\n\n[최근 대화 내용]\n${contextText}\n\n[새로운 질문]\n${question}`;
-
-    // 7. API 호출
+    // OpenAI 호출
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
+      messages,
     });
-
     const answer = completion.choices[0]?.message?.content || "답변을 생성하지 못했습니다.";
 
     const embed = new EmbedBuilder()
@@ -79,7 +69,6 @@ export default {
       .addFields({ name: "AI 답변", value: answer })
       .setTimestamp();
 
-    // 8. 최종적으로 한 번만 응답을 수정합니다.
     await interaction.editReply({ embeds: [embed] });
   },
 };
