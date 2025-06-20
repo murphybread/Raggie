@@ -128,25 +128,22 @@ if (fs.existsSync(commandsPath)) {
 }
 
 // 슬래시 명령어(interaction) 처리
-client.on(Events.InteractionCreate, async interaction => {
+client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
+
   const command = interaction.client.commands.get(interaction.commandName);
   if (!command) {
-    await interaction.reply({ content: '알 수 없는 명령어입니다.', ephemeral: true });
-    return;
+    return interaction.reply({ content: "알 수 없는 명령어입니다.", flags: 64 }).catch(console.error);
   }
+
   try {
     await command.execute(interaction);
   } catch (error) {
-    console.error(error);
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply('명령어 실행 중 오류가 발생했습니다.');
-    } else {
-      await interaction.reply({ content: '명령어 실행 중 오류가 발생했습니다.', ephemeral: true });
-    }
+    // 모든 오류는 여기서 처리 (추가 응답 시도하지 않음)
+    console.error(`명령어 [${interaction.commandName}] 실행 중 오류 발생:`);
+    console.error(error.stack || error);
   }
 });
-
 
 // 비동기 함수 예외 처리 및 프로세스 종료 감지
 process.on('uncaughtException', (err) => {
