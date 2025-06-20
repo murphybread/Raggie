@@ -7,6 +7,7 @@ import { handleAsk } from './rag.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const LOG_PATH = 'logs/messages.json';
 
 app.use(bodyParser.json());
 
@@ -17,14 +18,19 @@ app.post('/log', (req, res) => {
     return res.status(400).json({ error: 'No message content' });
   }
   let logs = [];
-  if (fs.existsSync('messages.json')) {
-    logs = JSON.parse(fs.readFileSync('messages.json'));
+  if (fs.existsSync(LOG_PATH)) {
+    logs = JSON.parse(fs.readFileSync(LOG_PATH));
   }
   logs.push({
     ...message,
     timestamp: new Date().toISOString()
   });
-  fs.writeFileSync('messages.json', JSON.stringify(logs, null, 2));
+  // logs 폴더 없으면 생성
+  const logDir = require('path').dirname(LOG_PATH);
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+  fs.writeFileSync(LOG_PATH, JSON.stringify(logs, null, 2));
   res.json({ status: 'ok' });
 });
 

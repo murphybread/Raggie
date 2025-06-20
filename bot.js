@@ -68,7 +68,7 @@ function getLogFileName(date = new Date()) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
-  return `messages_${y}${m}${d}.json`;
+  return `logs/messages_${y}${m}${d}.json`;
 }
 
 // 5분마다 메시지 자동 수집 (누락 없이, 날짜별 저장, 다양한 정보 파싱)
@@ -83,6 +83,11 @@ async function collectRecentMessages() {
     return;
   }
   const logFile = getLogFileName();
+  // logs 폴더 없으면 생성
+  const logDir = path.dirname(logFile);
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
   let logs = [];
   if (fs.existsSync(logFile)) {
     logs = JSON.parse(fs.readFileSync(logFile));
@@ -135,6 +140,30 @@ async function collectRecentMessages() {
   }
   console.log(`[자동수집] ${startTime.toISOString()} ~ ${endTime.toISOString()} | 새 메시지 ${fetched.length}개 저장 완료 (마지막 메시지: ${lastMsgInfo}) | 파일: ${logFile}`);
 }
+
+// 로그를 파일에도 저장하는 함수
+function appendLogToFile(...args) {
+  const logDir = 'logs';
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+  const logFile = path.join(logDir, 'bot.log');
+  const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  fs.appendFileSync(logFile, line);
+}
+
+// 기존 console.log/error를 가로채서 파일에도 기록
+const origLog = console.log;
+const origErr = console.error;
+console.log = (...args) => {
+  origLog(...args);
+  appendLogToFile(...args);
+};
+console.error = (...args) => {
+  origErr(...args);
+  appendLogToFile('[ERROR]', ...args);
+};
 
 // 비동기 함수 예외 처리 및 프로세스 종료 감지
 process.on('uncaughtException', (err) => {

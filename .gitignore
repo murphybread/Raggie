@@ -4,3 +4,6 @@ messages.json
 messages*.json
 .DS_Store
 npm-debug.log
+
+
+logs/
