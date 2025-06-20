@@ -194,18 +194,29 @@ async function collectRecentMessagesForChannel(channelId) {
     return;
   }
   fetched.forEach(msg => {
+
+    const embedData = msg.embeds.map((embed) => {
+      return {
+        author: embed.author?.name || null,
+        title: embed.title || null,
+        description: embed.description || null,
+        fields: embed.fields.map((field) => ({ name: field.name, value: field.value })),
+        footer: embed.footer?.text || null,
+      };
+    });
     logs.push({
       id: msg.id,
       author: msg.author.username,
       authorId: msg.author.id,
       content: msg.content,
+      embeds: embedData,
       channel: msg.channel.id,
       channelName: msg.channel.name,
       timestamp: msg.createdAt.toISOString(),
-      attachments: msg.attachments.map(a => a.url),
-      mentions: msg.mentions.users.map(u => u.id),
+      attachments: msg.attachments.map((a) => a.url),
+      mentions: msg.mentions.users.map((u) => u.id),
       isBot: msg.author.bot,
-      referencedMessageId: msg.reference?.messageId || null
+      referencedMessageId: msg.reference?.messageId || null,
     });
   });
   fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
