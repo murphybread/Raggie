@@ -2,6 +2,38 @@ import { Client, GatewayIntentBits, Events } from 'discord.js';
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
+import { collectRecentMessagesForChannel } from "./utils/logCollector.js";
+
+
+// 로그를 파일에도 저장하는 함수
+function appendLogToFile(logLine) {
+  const logDir = "logs";
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+  const logFile = path.join(logDir, "bot.log");
+  fs.appendFileSync(logFile, logLine + "\n");
+}
+
+// 기존 console.log/error를 가로채기 위해 원본 함수를 저장
+const origLog = console.log;
+const origErr = console.error;
+
+// console.log의 작동 방식 재정의
+console.log = (...args) => {
+  const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+  const finalLogLine = `[${new Date().toISOString()}] ${msg}`;
+  origLog(finalLogLine);
+  appendLogToFile(finalLogLine);
+};
+
+// console.error의 작동 방식 재정의
+console.error = (...args) => {
+  const msg = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+  const finalLogLine = `[${new Date().toISOString()}] [ERROR] ${msg}`;
+  origErr(finalLogLine);
+  appendLogToFile(finalLogLine);
+};
 
 // 여러 채널 지원: .env에 TARGET_CHANNEL_IDS=123,456,789 형태로 지정
 const TARGET_CHANNEL_IDS = process.env.TARGET_CHANNEL_IDS
@@ -66,171 +98,18 @@ client.on('messageCreate', msg => {
   }
 });
 
-// 날짜별 파일명 생성 함수
-function getLogFileName(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `logs/messages_${y}${m}${d}.json`;
-}
 
-function sanitizeChannelName(name) {
-  return name ? name.replace(/[^a-zA-Z0-9_]/g, '_') : 'unknown';
-}
 
-function getLogFileNameByChannel(channelId, channelName, date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const safeName = sanitizeChannelName(channelName);
-  return `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
-}
 
-// 5분마다 메시지 자동 수집 (누락 없이, 날짜별 저장, 다양한 정보 파싱)
-async function collectRecentMessages() {
-  if (!TARGET_CHANNEL_ID) {
-    console.log('TARGET_CHANNEL_ID가 .env에 설정되어 있지 않습니다.');
-    return;
-  }
-  const channel = await client.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
-  if (!channel || !channel.isTextBased()) {
-    console.log('채널을 찾을 수 없거나 텍스트 채널이 아닙니다.');
-    return;
-  }
-  const logFile = getLogFileName();
-  // logs 폴더 없으면 생성
-  const logDir = path.dirname(logFile);
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
-  }
-  let logs = [];
-  if (fs.existsSync(logFile)) {
-    logs = JSON.parse(fs.readFileSync(logFile));
-  }
-  // 마지막 저장된 메시지 ID 찾기
-  const lastMsgId = logs.length > 0 ? logs[logs.length - 1].id : undefined;
-  let fetched = [];
-  let lastId = lastMsgId;
-  let fetchCount = 0;
-  const startTime = new Date();
-  let firstFetchedId = null;
-  while (true) {
-    const options = { limit: 100 };
-    if (lastId) options.after = lastId;
-    const batch = await channel.messages.fetch(options).catch(() => null);
-    if (!batch || batch.size === 0) break;
-    // 시간순 정렬
-    const sorted = Array.from(batch.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-    if (!firstFetchedId && sorted.length > 0) firstFetchedId = sorted[0].id;
-    fetched.push(...sorted);
-    lastId = sorted[sorted.length - 1].id;
-    fetchCount += sorted.length;
-    if (batch.size < 100) break; // 더 이상 없음
-  }
-  if (fetched.length === 0) {
-    console.log(`${startTime.toISOString()} ~ ${endTime.toISOString()} 새 메시지 없음`);
-    return;
-  }
-  fetched.forEach(msg => {
-    logs.push({
-      id: msg.id,
-      author: msg.author.username,
-      authorId: msg.author.id,
-      content: msg.content,
-      channel: msg.channel.id,
-      channelName: msg.channel.name,
-      timestamp: msg.createdAt.toISOString(),
-      attachments: msg.attachments.map(a => a.url),
-      mentions: msg.mentions.users.map(u => u.id),
-      isBot: msg.author.bot,
-      referencedMessageId: msg.reference?.messageId || null
-    });
-  });
-  fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
-  const endTime = new Date();
-  let lastMsgInfo = '';
-  if (fetched.length > 0) {
-    const lastMsg = fetched[fetched.length - 1];
-    lastMsgInfo = `ID: ${lastMsg.id}, 내용: ${lastMsg.content}`;
-  }
-  console.log(`[자동수집] ${startTime.toISOString()} ~ ${endTime.toISOString()} | 새 메시지 ${fetched.length}개 저장 완료 (마지막 메시지: ${lastMsgInfo}) | 파일: ${logFile}`);
-}
 
-// 여러 채널의 메시지 자동 수집
-async function collectRecentMessagesForChannel(channelId) {
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || !channel.isTextBased()) {
-    console.log(`[${channelId}] 채널을 찾을 수 없거나 텍스트 채널이 아닙니다.`);
-    return;
-  }
-  const logFile = getLogFileNameByChannel(channelId, channel.name);
-  const logDir = path.dirname(logFile);
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
-  }
-  let logs = [];
-  if (fs.existsSync(logFile)) {
-    logs = JSON.parse(fs.readFileSync(logFile));
-  }
-  // 마지막 저장된 메시지 ID 찾기
-  const lastMsgId = logs.length > 0 ? logs[logs.length - 1].id : undefined;
-  let fetched = [];
-  let lastId = lastMsgId;
-  const startTime = new Date();
-  let lastMsgInfo = '';
-  while (true) {
-    const options = { limit: 100 };
-    if (lastId) options.after = lastId;
-    const batch = await channel.messages.fetch(options).catch(() => null);
-    if (!batch || batch.size === 0) break;
-    const sorted = Array.from(batch.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-    fetched.push(...sorted);
-    lastId = sorted[sorted.length - 1].id;
-    if (batch.size < 100) break;
-  }
-  if (fetched.length === 0) {
-    const endTime = new Date();
-    console.log(`[${channelId}] ${startTime.toISOString()} ~ ${endTime.toISOString()}  새 메시지 없음`);
-    return;
-  }
-  fetched.forEach(msg => {
 
-    const embedData = msg.embeds.map((embed) => {
-      return {
-        author: embed.author?.name || null,
-        title: embed.title || null,
-        description: embed.description || null,
-        fields: embed.fields.map((field) => ({ name: field.name, value: field.value })),
-        footer: embed.footer?.text || null,
-      };
-    });
-    logs.push({
-      id: msg.id,
-      author: msg.author.username,
-      authorId: msg.author.id,
-      content: msg.content,
-      embeds: embedData,
-      channel: msg.channel.id,
-      channelName: msg.channel.name,
-      timestamp: msg.createdAt.toISOString(),
-      attachments: msg.attachments.map((a) => a.url),
-      mentions: msg.mentions.users.map((u) => u.id),
-      isBot: msg.author.bot,
-      referencedMessageId: msg.reference?.messageId || null,
-    });
-  });
-  fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
-  const endTime = new Date();
-  if (fetched.length > 0) {
-    const lastMsg = fetched[fetched.length - 1];
-    lastMsgInfo = `ID: ${lastMsg.id}, 내용: ${lastMsg.content}`;
-  }
-  console.log(`[${channelId}] [자동수집] ${startTime.toISOString()} ~ ${endTime.toISOString()} | 새 메시지 ${fetched.length}개 저장 완료 (마지막 메시지: ${lastMsgInfo}) | 파일: ${logFile}`);
-}
+
+
 
 async function collectAllChannels() {
   for (const channelId of TARGET_CHANNEL_IDS) {
-    await collectRecentMessagesForChannel(channelId);
+    // client 객체를 인자로 넘겨줍니다.
+    await collectRecentMessagesForChannel(client, channelId);
   }
 }
 
@@ -268,29 +147,6 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// 로그를 파일에도 저장하는 함수
-function appendLogToFile(...args) {
-  const logDir = 'logs';
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
-  }
-  const logFile = path.join(logDir, 'bot.log');
-  const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-  const line = `[${new Date().toISOString()}] ${msg}\n`;
-  fs.appendFileSync(logFile, line);
-}
-
-// 기존 console.log/error를 가로채서 파일에도 기록
-const origLog = console.log;
-const origErr = console.error;
-console.log = (...args) => {
-  origLog(...args);
-  appendLogToFile(...args);
-};
-console.error = (...args) => {
-  origErr(...args);
-  appendLogToFile('[ERROR]', ...args);
-};
 
 // 비동기 함수 예외 처리 및 프로세스 종료 감지
 process.on('uncaughtException', (err) => {
