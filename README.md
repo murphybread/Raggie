@@ -3,8 +3,8 @@
 Raggie는 디스코드 채팅 로그를 수집·저장하고, 저장된 데이터를 기반으로 RAG(Retrieval-Augmented Generation) 방식의 답변을 제공하는 소규모 서버용 Express 백엔드 프로젝트입니다.
 
 ## 주요 기능
-- 디스코드 채팅 로그 **5분마다 자동 수집** (누락 없이)
-- 날짜별(`messages_YYYYMMDD.json`)로 파일 저장
+- 디스코드 채팅 로그 **5분마다 자동 수집** (누락 없이, 여러 채널 지원)
+- 날짜별(`messages_채널이름_채널ID_날짜.json`)로 파일 저장
 - 다양한 정보(작성자ID, 채널명, 첨부파일, 멘션 등) 파싱 및 저장
 - 최근 대화 기반 RAG 답변 API 제공
 - 간단한 파일 기반 데이터 관리
@@ -43,17 +43,17 @@ Raggie는 디스코드 채팅 로그를 수집·저장하고, 저장된 데이�
 ```env
 PORT=3000
 DISCORD_TOKEN=여기에_디스코드_봇_토큰_입력
-TARGET_CHANNEL_ID=수집할_디스코드_채널_ID
+TARGET_CHANNEL_IDS=채널ID1,채널ID2,채널ID3
 LOG_SERVER_URL=http://localhost:3000/log
 ```
 - **PORT**: Express 서버가 사용할 포트
 - **DISCORD_TOKEN**: 디스코드 개발자 포털에서 발급받은 봇 토큰 (실제 코드에서 이 변수명을 사용)
-- **TARGET_CHANNEL_ID**: **자동 메시지 수집에 사용되는 디스코드 채널의 ID**
+- **TARGET_CHANNEL_IDS**: **자동 메시지 수집에 사용되는 디스코드 채널들의 ID(쉼표로 구분)**
 - **LOG_SERVER_URL**: 로그를 저장할 Express 서버의 엔드포인트(로컬이면 그대로 사용)
 
 ## 메시지 자동 수집 및 저장 구조
-- 5분마다 TARGET_CHANNEL_ID의 새 메시지를 누락 없이 자동 수집
-- 날짜별로 `messages_YYYYMMDD.json` 파일에 저장
+- 5분마다 TARGET_CHANNEL_IDS에 지정된 각 채널의 새 메시지를 누락 없이 자동 수집
+- 날짜별로 `logs/messages_채널이름_채널ID_YYYYMMDD.json` 파일에 저장
 - 저장되는 정보 예시:
   ```json
   {
@@ -98,3 +98,18 @@ LOG_SERVER_URL=http://localhost:3000/log
 
 ---
 문의 및 기여는 언제든 환영합니다!
+
+
+
+
+https://platform.openai.com/docs/pricing#embeddings
+Embeddings
+Price per 1M tokens
+Batch API price
+Model	Cost
+text-embedding-3-small
+$0.02
+text-embedding-3-large
+$0.13
+text-embedding-ada-002
+$0.10
