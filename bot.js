@@ -3,7 +3,10 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 
-const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
+// 여러 채널 지원: .env에 TARGET_CHANNEL_IDS=123,456,789 형태로 지정
+const TARGET_CHANNEL_IDS = process.env.TARGET_CHANNEL_IDS
+  ? process.env.TARGET_CHANNEL_IDS.split(',').map(id => id.trim()).filter(Boolean)
+  : (process.env.TARGET_CHANNEL_ID ? [process.env.TARGET_CHANNEL_ID] : []);
 
 console.log('봇 시작 중...');
 console.log('사용 중인 토큰(마스킹됨):', process.env.DISCORD_TOKEN ? '✓ 설정됨' : '✗ 없음');
@@ -37,9 +40,9 @@ client.once('ready', () => {
   }
 
   // 5분마다 자동 수집 시작
-  setInterval(collectRecentMessages, 5 * 60 * 1000);
+  setInterval(collectAllChannels, 5 * 60 * 1000);
   // 봇 시작 시 1회 즉시 실행
-  collectRecentMessages();
+  collectAllChannels();
 });
 
 // 서버 참가 이벤트 추가
@@ -69,6 +72,18 @@ function getLogFileName(date = new Date()) {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `logs/messages_${y}${m}${d}.json`;
+}
+
+function sanitizeChannelName(name) {
+  return name ? name.replace(/[^a-zA-Z0-9_]/g, '_') : 'unknown';
+}
+
+function getLogFileNameByChannel(channelId, channelName, date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const safeName = sanitizeChannelName(channelName);
+  return `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
 }
 
 // 5분마다 메시지 자동 수집 (누락 없이, 날짜별 저장, 다양한 정보 파싱)
@@ -113,7 +128,7 @@ async function collectRecentMessages() {
     if (batch.size < 100) break; // 더 이상 없음
   }
   if (fetched.length === 0) {
-    console.log('새 메시지 없음');
+    console.log(`${startTime.toISOString()} ~ ${endTime.toISOString()} 새 메시지 없음`);
     return;
   }
   fetched.forEach(msg => {
@@ -140,6 +155,107 @@ async function collectRecentMessages() {
   }
   console.log(`[자동수집] ${startTime.toISOString()} ~ ${endTime.toISOString()} | 새 메시지 ${fetched.length}개 저장 완료 (마지막 메시지: ${lastMsgInfo}) | 파일: ${logFile}`);
 }
+
+// 여러 채널의 메시지 자동 수집
+async function collectRecentMessagesForChannel(channelId) {
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    console.log(`[${channelId}] 채널을 찾을 수 없거나 텍스트 채널이 아닙니다.`);
+    return;
+  }
+  const logFile = getLogFileNameByChannel(channelId, channel.name);
+  const logDir = path.dirname(logFile);
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+  let logs = [];
+  if (fs.existsSync(logFile)) {
+    logs = JSON.parse(fs.readFileSync(logFile));
+  }
+  // 마지막 저장된 메시지 ID 찾기
+  const lastMsgId = logs.length > 0 ? logs[logs.length - 1].id : undefined;
+  let fetched = [];
+  let lastId = lastMsgId;
+  const startTime = new Date();
+  let lastMsgInfo = '';
+  while (true) {
+    const options = { limit: 100 };
+    if (lastId) options.after = lastId;
+    const batch = await channel.messages.fetch(options).catch(() => null);
+    if (!batch || batch.size === 0) break;
+    const sorted = Array.from(batch.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+    fetched.push(...sorted);
+    lastId = sorted[sorted.length - 1].id;
+    if (batch.size < 100) break;
+  }
+  if (fetched.length === 0) {
+    const endTime = new Date();
+    console.log(`[${channelId}] ${startTime.toISOString()} ~ ${endTime.toISOString()}  새 메시지 없음`);
+    return;
+  }
+  fetched.forEach(msg => {
+    logs.push({
+      id: msg.id,
+      author: msg.author.username,
+      authorId: msg.author.id,
+      content: msg.content,
+      channel: msg.channel.id,
+      channelName: msg.channel.name,
+      timestamp: msg.createdAt.toISOString(),
+      attachments: msg.attachments.map(a => a.url),
+      mentions: msg.mentions.users.map(u => u.id),
+      isBot: msg.author.bot,
+      referencedMessageId: msg.reference?.messageId || null
+    });
+  });
+  fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
+  const endTime = new Date();
+  if (fetched.length > 0) {
+    const lastMsg = fetched[fetched.length - 1];
+    lastMsgInfo = `ID: ${lastMsg.id}, 내용: ${lastMsg.content}`;
+  }
+  console.log(`[${channelId}] [자동수집] ${startTime.toISOString()} ~ ${endTime.toISOString()} | 새 메시지 ${fetched.length}개 저장 완료 (마지막 메시지: ${lastMsgInfo}) | 파일: ${logFile}`);
+}
+
+async function collectAllChannels() {
+  for (const channelId of TARGET_CHANNEL_IDS) {
+    await collectRecentMessagesForChannel(channelId);
+  }
+}
+
+// commands 폴더의 명령어를 client.commands에 저장
+client.commands = new Map();
+const commandsPath = path.join(process.cwd(), 'commands');
+if (fs.existsSync(commandsPath)) {
+  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+  for (const file of commandFiles) {
+    const fileUrl = (await import('url')).pathToFileURL(path.join(commandsPath, file)).href;
+    const command = (await import(fileUrl)).default;
+    if (command && command.data && command.execute) {
+      client.commands.set(command.data.name, command);
+    }
+  }
+}
+
+// 슬래시 명령어(interaction) 처리
+client.on(Events.InteractionCreate, async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+  const command = interaction.client.commands.get(interaction.commandName);
+  if (!command) {
+    await interaction.reply({ content: '알 수 없는 명령어입니다.', ephemeral: true });
+    return;
+  }
+  try {
+    await command.execute(interaction);
+  } catch (error) {
+    console.error(error);
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply('명령어 실행 중 오류가 발생했습니다.');
+    } else {
+      await interaction.reply({ content: '명령어 실행 중 오류가 발생했습니다.', ephemeral: true });
+    }
+  }
+});
 
 // 로그를 파일에도 저장하는 함수
 function appendLogToFile(...args) {
