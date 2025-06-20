@@ -24,16 +24,18 @@ export async function collectRecentMessagesForChannel(client, channelId) {
     return;
   }
 
-  const logFile = getLogFileNameByChannel(channelId, channel.name);
+  const logFile = getLogFileNameByChannel(channel.id, channel.name); // 날짜 인자 없이!
   const logDir = path.dirname(logFile);
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
-  }
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
   let logs = [];
   if (fs.existsSync(logFile)) {
     logs = JSON.parse(fs.readFileSync(logFile, "utf-8"));
   }
+
+  // 30일 이내 메시지만 남기기
+  const now = Date.now();
+  logs = logs.filter((msg) => now - new Date(msg.timestamp).getTime() < 30 * 24 * 60 * 60 * 1000);
 
   const lastMsgId = logs.length > 0 ? logs[logs.length - 1].id : undefined;
 
@@ -57,27 +59,29 @@ export async function collectRecentMessagesForChannel(client, channelId) {
   }
 
   fetched.forEach((msg) => {
-    const embedData = msg.embeds.map((embed) => ({
-      author: embed.author?.name || null,
-      title: embed.title || null,
-      description: embed.description || null,
-      fields: embed.fields.map((field) => ({ name: field.name, value: field.value })),
-      footer: embed.footer?.text || null,
-    }));
-    logs.push({
-      id: msg.id,
-      author: msg.author.username,
-      authorId: msg.author.id,
-      content: msg.content,
-      embeds: embedData,
-      channel: msg.channel.id,
-      channelName: msg.channel.name,
-      timestamp: msg.createdAt.toISOString(),
-      attachments: msg.attachments.map((a) => a.url),
-      mentions: msg.mentions.users.map((u) => u.id),
-      isBot: msg.author.bot,
-      referencedMessageId: msg.reference?.messageId || null,
-    });
+    if (!logs.some((l) => l.id === msg.id)) {
+      const embedData = msg.embeds.map((embed) => ({
+        author: embed.author?.name || null,
+        title: embed.title || null,
+        description: embed.description || null,
+        fields: embed.fields.map((field) => ({ name: field.name, value: field.value })),
+        footer: embed.footer?.text || null,
+      }));
+      logs.push({
+        id: msg.id,
+        author: msg.author.username,
+        authorId: msg.author.id,
+        content: msg.content,
+        embeds: embedData,
+        channel: msg.channel.id,
+        channelName: msg.channel.name,
+        timestamp: msg.createdAt.toISOString(),
+        attachments: msg.attachments.map((a) => a.url),
+        mentions: msg.mentions.users.map((u) => u.id),
+        isBot: msg.author.bot,
+        referencedMessageId: msg.reference?.messageId || null,
+      });
+    }
   });
 
   fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
