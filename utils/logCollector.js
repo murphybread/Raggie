@@ -6,13 +6,48 @@ function sanitizeChannelName(name) {
   return name ? name.replace(/[^a-zA-Z0-9_]/g, "_") : "unknown";
 }
 
+// KST 변환 함수 (중복 방지 위해 파일 상단에 위치)
+function toKST(date) {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return new Date(d.getTime() + 9 * 60 * 60 * 1000);
+}
+
 // 채널 정보 기반으로 로그 파일 경로를 생성하는 함수
 export function getLogFileNameByChannel(channelId, channelName, date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
+  // date가 '+09:00' 등 오프셋이 포함된 문자열이면 직접 파싱
+  if (typeof date === 'string' && /([+-][0-9]{2}:[0-9]{2})$/.test(date)) {
+    const match = date.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})/);
+    if (match) {
+      const y = match[1];
+      const m = match[2];
+      const d = match[3];
+      const safeName = sanitizeChannelName(channelName);
+      const fileName = `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
+      console.log('[getLogFileNameByChannel] (KST string) date:', date, '→', fileName);
+      return fileName;
+    }
+  }
+  // KST ISO 문자열에서 연,월,일 추출
+  const kstISOString = toKST(date).toISOString().replace('Z', '+09:00');
+  const match = kstISOString.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})/);
+  if (match) {
+    const y = match[1];
+    const m = match[2];
+    const d = match[3];
+    const safeName = sanitizeChannelName(channelName);
+    const fileName = `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
+    console.log('[getLogFileNameByChannel] (KST ISO) date:', date, 'KST ISO:', kstISOString, '→', fileName);
+    return fileName;
+  }
+  // fallback (기존 방식)
+  const kstDate = toKST(date);
+  const y = kstDate.getFullYear();
+  const m = String(kstDate.getMonth() + 1).padStart(2, "0");
+  const d = String(kstDate.getDate()).padStart(2, "0");
   const safeName = sanitizeChannelName(channelName);
-  return `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
+  const fileName = `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
+  console.log('[getLogFileNameByChannel] (fallback) date:', date, 'KST:', kstDate, '→', fileName);
+  return fileName;
 }
 
 // 특정 채널의 최신 메시지를 수집하는 핵심 함수
@@ -24,29 +59,14 @@ export async function collectRecentMessagesForChannel(client, channelId) {
     return;
   }
 
-  const logFile = getLogFileNameByChannel(channel.id, channel.name); // 날짜 인자 없이!
-  const logDir = path.dirname(logFile);
-  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-
-  let logs = [];
-  if (fs.existsSync(logFile)) {
-    logs = JSON.parse(fs.readFileSync(logFile, "utf-8"));
-  }
-
-  // 30일 이내 메시지만 남기기
-  const now = Date.now();
-  logs = logs.filter((msg) => now - new Date(msg.timestamp).getTime() < 30 * 24 * 60 * 60 * 1000);
-
-  const lastMsgId = logs.length > 0 ? logs[logs.length - 1].id : undefined;
-
+  // 메시지 fetch 루프 복구
   const fetched = [];
-  let lastFetchedId = lastMsgId;
+  let lastFetchedId = undefined;
   while (true) {
     const options = { limit: 100 };
     if (lastFetchedId) options.after = lastFetchedId;
     const batch = await channel.messages.fetch(options).catch(() => null);
     if (!batch || batch.size === 0) break;
-
     const sorted = Array.from(batch.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
     fetched.push(...sorted);
     lastFetchedId = sorted[sorted.length - 1].id;
@@ -58,8 +78,20 @@ export async function collectRecentMessagesForChannel(client, channelId) {
     return;
   }
 
+  // 메시지별로 KST 날짜 기준 파일에 저장
+  const logsByFile = {};
   fetched.forEach((msg) => {
-    if (!logs.some((l) => l.id === msg.id)) {
+    const logFileForMsg = getLogFileNameByChannel(msg.channel.id, msg.channel.name, msg.createdAt);
+    if (!logsByFile[logFileForMsg]) {
+      // 파일이 이미 존재하면 읽고, 없으면 빈 배열
+      if (fs.existsSync(logFileForMsg)) {
+        logsByFile[logFileForMsg] = JSON.parse(fs.readFileSync(logFileForMsg, "utf-8"));
+      } else {
+        logsByFile[logFileForMsg] = [];
+      }
+    }
+    const logsArr = logsByFile[logFileForMsg];
+    if (!logsArr.some((l) => l.id === msg.id)) {
       const embedData = msg.embeds.map((embed) => ({
         author: embed.author?.name || null,
         title: embed.title || null,
@@ -67,7 +99,7 @@ export async function collectRecentMessagesForChannel(client, channelId) {
         fields: embed.fields.map((field) => ({ name: field.name, value: field.value })),
         footer: embed.footer?.text || null,
       }));
-      logs.push({
+      logsArr.push({
         id: msg.id,
         author: msg.author.username,
         authorId: msg.author.id,
@@ -75,7 +107,7 @@ export async function collectRecentMessagesForChannel(client, channelId) {
         embeds: embedData,
         channel: msg.channel.id,
         channelName: msg.channel.name,
-        timestamp: msg.createdAt.toISOString(),
+        timestamp: toKST(msg.createdAt).toISOString().replace('Z', '+09:00'),
         attachments: msg.attachments.map((a) => a.url),
         mentions: msg.mentions.users.map((u) => u.id),
         isBot: msg.author.bot,
@@ -84,6 +116,12 @@ export async function collectRecentMessagesForChannel(client, channelId) {
     }
   });
 
-  fs.writeFileSync(logFile, JSON.stringify(logs, null, 2));
+  // 파일별로 저장
+  Object.entries(logsByFile).forEach(([file, logsArr]) => {
+    // 30일 이내 메시지만 남기기
+    const now = Date.now();
+    const filtered = logsArr.filter((msg) => now - new Date(msg.timestamp).getTime() < 30 * 24 * 60 * 60 * 1000);
+    fs.writeFileSync(file, JSON.stringify(filtered, null, 2));
+  });
   console.log(`[${channelId}] [주기적 수집] 새 메시지 ${fetched.length}개 저장 완료.`);
 }
