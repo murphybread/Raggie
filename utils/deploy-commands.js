@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
+
 // 로그 파일에도 기록하는 함수
 function appendLogToFile(...args) {
   const logDir = 'logs';
