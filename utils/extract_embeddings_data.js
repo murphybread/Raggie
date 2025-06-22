@@ -68,6 +68,11 @@ for (const file of files) {
     }
   }
 
+  // lines가 비어있으면 'empty content' 추가
+  if (lines.length === 0) {
+    lines.push('empty content');
+  }
+
   const outputFile = path.join(outputDir, file.replace(/^messages_/, "embeddings_").replace(/\.json$/, ".txt"));
   fs.writeFileSync(outputFile, lines.join("\n"), "utf-8");
   console.log("RAG 친화적 텍스트 추출 완료:", outputFile);
