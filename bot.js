@@ -72,7 +72,7 @@ client.once('ready', () => {
   }
 
   // 5분마다 자동 수집 시작
-  setInterval(collectAllChannels, 5 * 60 * 1000);
+  setInterval(collectAllChannels, 1 * 60 * 1000);
   // 봇 시작 시 1회 즉시 실행
   collectAllChannels();
 });

@@ -56,9 +56,31 @@ export async function collectRecentMessagesForChannel(client, channelId) {
     return;
   }
 
-  // 메시지 fetch 루프 복구
+  // 이미 저장된 로그 파일들 중 가장 최근 메시지 ID 찾기
+  let lastSavedId = undefined;
+  let lastSavedTimestamp = 0;
+  const logDir = path.resolve("logs");
+  if (fs.existsSync(logDir)) {
+    const files = fs.readdirSync(logDir).filter(f => f.includes(channelId));
+    let latestMsg = null;
+    for (const file of files) {
+      const filePath = path.join(logDir, file);
+      try {
+        const arr = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+        for (const msg of arr) {
+          if (!latestMsg || new Date(msg.timestamp).getTime() > lastSavedTimestamp) {
+            latestMsg = msg;
+            lastSavedTimestamp = new Date(msg.timestamp).getTime();
+            lastSavedId = msg.id;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // 메시지 fetch 루프 (after: lastSavedId 적용)
   const fetched = [];
-  let lastFetchedId = undefined;
+  let lastFetchedId = lastSavedId;
   while (true) {
     const options = { limit: 100 };
     if (lastFetchedId) options.after = lastFetchedId;
