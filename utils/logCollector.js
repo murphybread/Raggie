@@ -23,7 +23,6 @@ export function getLogFileNameByChannel(channelId, channelName, date = new Date(
       const d = match[3];
       const safeName = sanitizeChannelName(channelName);
       const fileName = `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
-      console.log('[getLogFileNameByChannel] (KST string) date:', date, '→', fileName);
       return fileName;
     }
   }
@@ -36,7 +35,6 @@ export function getLogFileNameByChannel(channelId, channelName, date = new Date(
     const d = match[3];
     const safeName = sanitizeChannelName(channelName);
     const fileName = `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
-    console.log('[getLogFileNameByChannel] (KST ISO) date:', date, 'KST ISO:', kstISOString, '→', fileName);
     return fileName;
   }
   // fallback (기존 방식)
@@ -46,7 +44,6 @@ export function getLogFileNameByChannel(channelId, channelName, date = new Date(
   const d = String(kstDate.getDate()).padStart(2, "0");
   const safeName = sanitizeChannelName(channelName);
   const fileName = `logs/messages_${safeName}_${channelId}_${y}${m}${d}.json`;
-  console.log('[getLogFileNameByChannel] (fallback) date:', date, 'KST:', kstDate, '→', fileName);
   return fileName;
 }
 
