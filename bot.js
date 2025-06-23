@@ -103,9 +103,6 @@ client.on('messageCreate', msg => {
 
 
 
-
-
-
 async function collectAllChannels() {
   for (const channelId of TARGET_CHANNEL_IDS) {
     // client 객체를 인자로 넘겨줍니다.

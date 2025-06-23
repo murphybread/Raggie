@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 
 // 채널 이름을 파일명에 안전하게 사용하도록 필터링하는 함수
-function sanitizeChannelName(name) {
+export function sanitizeChannelName(name) {
   return name ? name.replace(/[^a-zA-Z0-9_]/g, "_") : "unknown";
 }
 
