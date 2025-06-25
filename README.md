@@ -9,6 +9,8 @@ Raggie는 디스코드 채팅 로그를 자동 수집·저장하고, OpenAI LLM�
 - logs 폴더에 메시지/실행 로그 저장
 
 ## 설치 및 실행
+
+Install
 ```bash
 npm install
 ```
@@ -17,7 +19,7 @@ npm install
 npm start
 ```
 
-## .env 예시
+# Env file setting
 ```env
 DISCORD_TOKEN=디스코드_봇_토큰
 OPENAI_API_KEY=OpenAI_API_키
